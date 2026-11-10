@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<title>Tap Daud</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#fff7ec;--fg:#2b1d0e;--card:#fff;--ac:#e8590c;--mu:#8a7560;--bd:#f0d9b8}
+@media (prefers-color-scheme:dark){:root{--bg:#1c140c;--fg:#fbeedd;--card:#2a1e12;--ac:#ff8a3d;--mu:#b9a38b;--bd:#4a3722;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;text-align:center;padding:16px}
+h1{margin:8px 0 2px;font-size:28px}
+.s{margin:0 0 14px;color:var(--mu);font-size:14px}
+input{font-size:18px;padding:12px;border-radius:12px;border:2px solid var(--bd);background:var(--card);color:var(--fg);width:70%;max-width:260px;text-align:center;margin:4px}
+button{font-size:18px;border:0;border-radius:14px;background:var(--ac);color:#fff;padding:12px 22px;font-weight:700;margin:6px;cursor:pointer}
+button:disabled{opacity:.35}
+#tap{width:200px;height:200px;border-radius:50%;font-size:30px;margin:14px auto;display:block;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+#info{font-size:22px;font-weight:700;min-height:34px}
+#code{font-size:30px;letter-spacing:4px;font-weight:800;color:var(--ac)}
+#board{max-width:420px;margin:12px auto;text-align:left}
+.r{display:flex;justify-content:space-between;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px 14px;margin:6px 0;font-size:17px}
+.r.me{border-color:var(--ac);border-width:2px}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>🏃 Tap Daud</h1>
+<p class="s">10-15 jane ek sath khelo, sabse tej tap karo!</p>
+
+<div id="join">
+  <input id="nm" maxlength="14" placeholder="Apno naam likho"><br>
+  <button id="host">Naya room banao</button>
+  <hr style="border:0;border-top:1px solid var(--bd);margin:16px auto;max-width:300px">
+  <input id="rc" maxlength="4" inputmode="numeric" placeholder="Room code (4 ank)"><br>
+  <button id="jn">Room me jao</button>
+  <div id="err" class="s"></div>
+</div>
+
+<div id="game" class="hide">
+  <div class="s">Room code: <span id="code"></span></div>
+  <div id="info">…</div>
+  <button id="tap" disabled>TAP!</button>
+  <button id="start" class="hide">▶ Game chalu karo (30 sec)</button>
+  <div id="board"></div>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const PRE="tapdaud-";
+const ICONS=["🔴","🟠","🟡","🟢","🔵","🟣","🟤","⚫","⚪","🟥","🟧","🟩","🟦","🟪","🟨"];
+const COUNT=3000,DUR=30000;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let peer,conn,isHost=false,myName="",myId="me",conns={},players={},phase="idle",t0=0,state={phase:"idle",left:0,rows:[]},clock=null,bc=null;
+
+function name(){return ($("nm").value.trim()||"Khiladi").slice(0,14)}
+function showGame(code){$("join").classList.add("hide");$("game").classList.remove("hide");$("code").textContent=code}
+
+/* ---------- HOST ---------- */
+$("host").onclick=()=>{
+  myName=name();isHost=true;
+  const code=String(Math.floor(1000+Math.random()*9000));
+  peer=new Peer(PRE+code);
+  peer.on("open",()=>{
+    players[myId]={n:myName,i:ICONS[0],s:0};
+    showGame(code);$("start").classList.remove("hide");
+    hostTick();clock=setInterval(hostTick,250);
+  });
+  peer.on("error",e=>{$("err").textContent="Dikkat: "+e.type+" - fer koshish karo";});
+  peer.on("connection",c=>{
+    c.on("data",d=>{
+      if(d.t==="join"){
+        conns[c.peer]=c;
+        players[c.peer]={n:String(d.n).slice(0,14),i:ICONS[Object.keys(players).length%ICONS.length],s:0};
+      }else if(d.t==="tap"&&phase==="play"&&players[c.peer]){players[c.peer].s++}
+    });
+    c.on("close",()=>{delete conns[c.peer];delete players[c.peer]});
+  });
+};
+function hostTick(){
+  const el=Date.now()-t0;
+  if(phase==="count"&&el>=COUNT)phase="play";
+  if(phase==="play"&&el>=COUNT+DUR)phase="end";
+  const left=phase==="count"?Math.ceil((COUNT-el)/1000):phase==="play"?Math.ceil((COUNT+DUR-el)/1000):0;
+  const rows=Object.entries(players).map(([k,p])=>({id:k,n:p.n,i:p.i,s:p.s}));
+  state={phase,left,rows};
+  Object.values(conns).forEach(c=>{try{c.send({t:"state",st:state})}catch(e){}});
+  draw(state,myId);
+}
+$("start").onclick=()=>{
+  Object.values(players).forEach(p=>p.s=0);
+  phase="count";t0=Date.now();
+};
+
+/* ---------- GUEST ---------- */
+$("jn").onclick=()=>{
+  const code=$("rc").value.trim();
+  if(code.length!==4){$("err").textContent="4 ank ko code likho";return}
+  myName=name();peer=new Peer();
+  peer.on("open",id=>{
+    myId=id;conn=peer.connect(PRE+code,{reliable:true});
+    conn.on("open",()=>{conn.send({t:"join",n:myName});showGame(code)});
+    conn.on("data",d=>{if(d.t==="state")draw(d.st,myId)});
+    conn.on("close",()=>{$("info").textContent="Host ko connection tut gayo"});
+  });
+  peer.on("error",e=>{$("err").textContent=e.type==="peer-unavailable"?"Yo room nahi mila":"Dikkat: "+e.type});
+};
+
+/* ---------- COMMON ---------- */
+$("tap").onpointerdown=e=>{
+  e.preventDefault();
+  if(state.phase!=="play")return;
+  if(isHost){if(players[myId])players[myId].s++}
+  else if(conn&&conn.open)conn.send({t:"tap"});
+};
+function draw(st,me){
+  const mine=st.rows.find(r=>r.id===me);
+  const sc=mine?mine.s:0;
+  $("tap").disabled=st.phase!=="play";
+  if(isHost)$("start").disabled=st.phase==="count"||st.phase==="play";
+  $("info").textContent=st.phase==="idle"?"Sab ko aan dyo… ("+st.rows.length+" jane)":
+    st.phase==="count"?"Tayyar ho jao… "+st.left:
+    st.phase==="play"?"⏱ "+st.left+" sec  |  Tumare tap: "+sc:"Khatam! Tumare tap: "+sc;
+  const rows=[...st.rows].sort((a,b)=>b.s-a.s);
+  $("board").innerHTML=rows.map((r,k)=>'<div class="r'+(r.id===me?' me':'')+'"><span>'+(k===0&&r.s>0?'👑':(k+1)+'.')+' '+esc(r.i)+' '+esc(r.n)+(r.id===me?' (tum)':'')+'</span><b>'+r.s+'</b></div>').join("");
+}
+</script>
+</body>
+</html>
